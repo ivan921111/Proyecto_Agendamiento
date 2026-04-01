@@ -12,3 +12,15 @@ services:
       - "5173:5173"
     depends_on:
       - backend
+
+  db:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    container_name: sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=Ivan123**
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./db/init:/docker-entrypoint-initdb.d  
