@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   backend:
     build: ./backend
@@ -14,13 +12,10 @@ services:
       - backend
 
   db:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    platform: linux/amd64
+    image: mcr.microsoft.com/azure-sql-edge:latest
     container_name: sqlserver
     environment:
       - ACCEPT_EULA=Y
       - SA_PASSWORD=Ivan123**
     ports:
       - "1433:1433"
-    volumes:
-      - ./db/init:/docker-entrypoint-initdb.d  

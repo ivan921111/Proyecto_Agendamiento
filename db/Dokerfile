@@ -1,8 +1,0 @@
-FROM mcr.microsoft.com/mssql/server:2022-latest
-
-USER root
-
-COPY ./init /docker-entrypoint-initdb.d
-RUN chmod +x /docker-entrypoint-initdb.d/ejecuta.sh
-
-CMD /bin/bash /docker-entrypoint-initdb.d/ejecuta.sh & /opt/mssql/bin/sqlservr
