@@ -2,7 +2,13 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using QuestPDF;
+using QuestPDF.Infrastructure;
+using Scheduling.Api.Application.Services;
 using Scheduling.Api.Infrastructure.Data;
+
+// Configuración de QuestPDF (sin licencia para desarrollo)
+QuestPDF.Settings.License = LicenseType.Community;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -30,6 +36,19 @@ builder.Services.AddCors(options =>
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+
+// Registrar servicios PDF/Email
+builder.Services.AddSingleton<IPdfService, PdfService>();
+
+var useMockEmail = bool.TryParse(builder.Configuration["Email:UseMock"], out var isMock) && isMock;
+if (useMockEmail)
+{
+    builder.Services.AddScoped<IEmailService, MockEmailService>();
+}
+else
+{
+    builder.Services.AddScoped<IEmailService, EmailService>();
+}
 
 // Configuración de JWT
 builder.Services.AddAuthentication(options =>

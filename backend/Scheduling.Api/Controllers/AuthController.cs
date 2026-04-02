@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,6 +22,13 @@ public class AuthController : ControllerBase
     {
         _context = context;
         _configuration = configuration;
+    }
+
+    public class ActualizarPerfilDto
+    {
+        public string Email { get; set; }
+        public string Password { get; set; }
+        public DateTime? Birthdate { get; set; }
     }
 
     [HttpPost("register")]
@@ -68,6 +76,65 @@ public class AuthController : ControllerBase
         var token = GenerateJwtToken(user);
 
         return Ok(new { Token = token });
+    }
+
+    [Authorize]
+    [HttpGet("me")]
+    public async Task<IActionResult> ObtenerMiPerfil()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userIdClaim))
+            return Unauthorized("Token inválido o expirado");
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Token inválido");
+
+        var usuario = await _context.Users.FindAsync(userId);
+        if (usuario == null)
+            return NotFound("Usuario no encontrado");
+
+        return Ok(new
+        {
+            usuario.Id,
+            usuario.Username,
+            usuario.Email,
+            usuario.Birthdate
+        });
+    }
+
+    [Authorize]
+    [HttpPut("me")]
+    public async Task<IActionResult> ActualizarMiPerfil([FromBody] ActualizarPerfilDto datos)
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userIdClaim))
+            return Unauthorized("Token inválido o expirado");
+
+        if (!Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Token inválido");
+
+        var usuario = await _context.Users.FindAsync(userId);
+        if (usuario == null)
+            return NotFound("Usuario no encontrado");
+
+        if (!string.IsNullOrWhiteSpace(datos.Email))
+            usuario.Email = datos.Email;
+
+        if (datos.Birthdate.HasValue)
+            usuario.Birthdate = datos.Birthdate;
+
+        if (!string.IsNullOrWhiteSpace(datos.Password))
+            usuario.Password = BCrypt.Net.BCrypt.HashPassword(datos.Password);
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            usuario.Id,
+            usuario.Username,
+            usuario.Email,
+            usuario.Birthdate
+        });
     }
 
     private string GenerateJwtToken(User user)
