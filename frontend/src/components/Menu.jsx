@@ -33,13 +33,18 @@ const Menu = () => {
   const [esMedico, setEsMedico] = useState(false);
   const [medicoInfo, setMedicoInfo] = useState(null);
   const [disponibilidades, setDisponibilidades] = useState([]);
-  const [diaSemana, setDiaSemana] = useState('Lunes');
+  const [fechaDisponibilidad, setFechaDisponibilidad] = useState('');
   const [horaInicio, setHoraInicio] = useState('09:00');
   const [horaFin, setHoraFin] = useState('17:00');
   const [duracionMinutos, setDuracionMinutos] = useState(30);
   const [mensajeAjustes, setMensajeAjustes] = useState('');
   const [cargandoAjustes, setCargandoAjustes] = useState(false);
   const [citasMedicoReporte, setCitasMedicoReporte] = useState([]);
+  const [filtroFechaInicio, setFiltroFechaInicio] = useState('');
+  const [filtroFechaFin, setFiltroFechaFin] = useState('');
+  const [filtroPaciente, setFiltroPaciente] = useState('');
+  const [filtroEstado, setFiltroEstado] = useState('');
+  const [mensajeReporte, setMensajeReporte] = useState('');
 
 
   const navigate = useNavigate();
@@ -172,8 +177,6 @@ const Menu = () => {
 
       const datos = await respuesta.json();
       setCitas(datos);
-      const citaEspecialidad = datos.find((c) => c.pacienteId === perfil.id && c.especialidad === especialidadSeleccionada && c.estado !== 'Cancelada');
-      setCitaEspecialidadActual(citaEspecialidad || null);
       setMensajeCitas('Citas cargadas');
     } catch (error) {
       console.error('Error cargando citas:', error);
@@ -259,23 +262,24 @@ const Menu = () => {
       return;
     }
 
-    // Cargar citas actualizadas primero
-    let citasActualizadas = [];
+    // Cargar citas del usuario y citas ocupadas del médico en paralelo
+    let citasDelUsuario = [];
+    let citasOcupadasDelMedico = [];
     try {
-      const respuestaCitas = await fetch('http://localhost:5001/citas', {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      const [resCitasUsuario, resCitasOcupadas] = await Promise.all([
+        fetch('http://localhost:5001/citas', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`http://localhost:5001/citas/citas-ocupadas?medicoId=${medicoSeleccionado}`, { headers: { Authorization: `Bearer ${token}` } })
+      ]);
 
-      if (respuestaCitas.ok) {
-        citasActualizadas = await respuestaCitas.json();
-        setCitas(citasActualizadas);
-        console.log('Citas actualizadas:', citasActualizadas);
+      if (resCitasUsuario.ok) {
+        citasDelUsuario = await resCitasUsuario.json();
+        setCitas(citasDelUsuario);
+      }
+      if (resCitasOcupadas.ok) {
+        citasOcupadasDelMedico = await resCitasOcupadas.json();
       }
     } catch (error) {
-      console.error('Error recargando citas:', error);
+      console.error('Error cargando datos de citas:', error);
     }
 
     try {
@@ -292,54 +296,49 @@ const Menu = () => {
       }
 
       const disponibilidad = await respuesta.json();
+      console.log('Disponibilidad obtenida:', disponibilidad);
 
-      // Calcular citas disponibles
+      // Calcular citas disponibles de forma robusta
       const disponibles = [];
       const hoy = new Date();
-      const diasSemana = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+      hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
 
       for (let i = 1; i <= 30; i++) { // Próximos 30 días
         const fecha = new Date(hoy);
         fecha.setDate(hoy.getDate() + i);
-        const diaNombre = diasSemana[fecha.getDay()];
+        const fechaStr = fecha.toISOString().slice(0, 10);
 
-        const dispDia = disponibilidad.find(d => d.diaSemana === diaNombre);
+        const dispDia = disponibilidad.find(d => (d.fechaDisponibilidad || '').slice(0, 10) === fechaStr);
         if (dispDia) {
-          const horaInicio = new Date(`1970-01-01T${dispDia.horaInicio}`);
-          const horaFin = new Date(`1970-01-01T${dispDia.horaFin}`);
+          const [hInicio, mInicio] = dispDia.horaInicio.split(':').map(Number);
+          const [hFin, mFin] = dispDia.horaFin.split(':').map(Number);
 
-          for (let hora = horaInicio; hora < horaFin; hora.setMinutes(hora.getMinutes() + dispDia.duracionCitaMinutos)) {
-            const horaStr = hora.toTimeString().slice(0, 5);
+          let minutosActuales = hInicio * 60 + mInicio;
+          const minutosFin = hFin * 60 + mFin;
+
+          while (minutosActuales + dispDia.duracionCitaMinutos <= minutosFin) {
+            const hora = Math.floor(minutosActuales / 60).toString().padStart(2, '0');
+            const minutos = (minutosActuales % 60).toString().padStart(2, '0');
+            const horaStr = `${hora}:${minutos}:00`; // Formato HH:mm:ss
+
             disponibles.push({
-              fecha: fecha.toISOString().slice(0, 10),
+              fecha: fechaStr,
               hora: horaStr,
               medicoId: medicoSeleccionado,
               medicoNombre: medicosFiltrados.find(m => m.id === medicoSeleccionado)?.nombre + ' ' + medicosFiltrados.find(m => m.id === medicoSeleccionado)?.apellido,
               especialidad: especialidades.find(e => e.id === especialidadSeleccionada)?.nombre,
             });
+            minutosActuales += dispDia.duracionCitaMinutos;
           }
         }
       }
 
-      // Filtrar citas ya tomadas usando citasActualizadas
-      const citasTomadas = citasActualizadas.filter(c => c.medicoId === medicoSeleccionado && c.estado !== 'Cancelada');
-      console.log('Citas tomadas para este médico:', citasTomadas);
-      console.log('Disponibles antes de filtrar:', disponibles.length);
-      
-      const disponiblesFiltradas = disponibles.filter(disp => {
-        const estaAsignada = citasTomadas.some(cita => {
-          const fechaSon = (cita.fechaCita || '').slice(0, 10) === disp.fecha;
-          const horaSon = (cita.horaCita || '').slice(0, 5) === disp.hora;
-          return fechaSon && horaSon;
-        });
-        return !estaAsignada;
-      });
-
-      console.log('Disponibles después de filtrar:', disponiblesFiltradas.length);
+      const citasTomadasSet = new Set(citasOcupadasDelMedico.map(c => `${(c.fechaCita || '').slice(0, 10)}T${(c.horaCita || '')}`));
+      const disponiblesFiltradas = disponibles.filter(d => !citasTomadasSet.has(`${d.fecha}T${d.hora}`));
 
       // Ver si hay una cita activa (no cancelada) en esta especialidad para este paciente
       const nombreEspecialidadSeleccionada = especialidades.find(e => e.id === especialidadSeleccionada)?.nombre;
-      const citaEspecial = citasActualizadas.find(c => c.pacienteId === perfil.id && c.especialidad === nombreEspecialidadSeleccionada && c.estado !== 'Cancelada');
+      const citaEspecial = citasDelUsuario.find(c => c.especialidad === nombreEspecialidadSeleccionada && c.estado !== 'Cancelada');
       console.log('Cita especial encontrada:', citaEspecial);
       setCitaEspecialidadActual(citaEspecial || null);
 
@@ -371,14 +370,11 @@ const Menu = () => {
     setMensajeCitas(esReprogramacion ? 'Reprogramando cita...' : 'Creando cita...');
 
     try {
-      const horaNormalizada = citaDisp.hora.length === 5 ? `${citaDisp.hora}:00` : citaDisp.hora;
-      const fechaNormalizada = citaDisp.fecha;
-
       const payload = {
         idMedico: citaDisp.medicoId,
         idPaciente: perfil.id,
-        fechaCita: fechaNormalizada,
-        horaCita: horaNormalizada,
+        fechaCita: citaDisp.fecha,
+        horaCita: citaDisp.hora.length === 5 ? `${citaDisp.hora}:00` : citaDisp.hora, // Asegurar formato HH:mm:ss
       };
 
       console.log('Seleccionar cita payload', payload);
@@ -561,7 +557,7 @@ const Menu = () => {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
-          diaSemana,
+          fechaDisponibilidad,
           horaInicio,
           horaFin,
           duracionCitaMinutos: parseInt(duracionMinutos),
@@ -574,13 +570,15 @@ const Menu = () => {
         return;
       }
 
+      const nuevaDisponibilidad = await respuesta.json();
+
       setMensajeAjustes('Disponibilidad creada exitosamente.');
-      setDiaSemana('Lunes');
+      setFechaDisponibilidad('');
       setHoraInicio('09:00');
       setHoraFin('17:00');
       setDuracionMinutos(30);
 
-      await cargarDisponibilidadesMedico();
+      setDisponibilidades(prev => [...prev, nuevaDisponibilidad]);
     } catch (error) {
       console.error('Error creando disponibilidad:', error);
       setMensajeAjustes('Error de conexión.');
@@ -625,8 +623,16 @@ const Menu = () => {
   const cargarReporteCitasMedico = async () => {
     if (!token) return;
 
+    setMensajeReporte('Cargando reporte...');
+
     try {
-      const respuesta = await fetch('http://localhost:5001/citas/medico/reporte', {
+      const params = new URLSearchParams();
+      if (filtroFechaInicio) params.append('fechaInicio', filtroFechaInicio);
+      if (filtroFechaFin) params.append('fechaFin', filtroFechaFin);
+      if (filtroPaciente) params.append('paciente', filtroPaciente);
+      if (filtroEstado) params.append('estado', filtroEstado);
+
+      const respuesta = await fetch(`http://localhost:5001/citas/medico/reporte?${params.toString()}`, {
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
@@ -636,9 +642,15 @@ const Menu = () => {
       if (respuesta.ok) {
         const datos = await respuesta.json();
         setCitasMedicoReporte(datos);
+        setMensajeReporte(`Reporte cargado. Total: ${datos.length} citas.`);
+      } else {
+        const errorTexto = await respuesta.text();
+        console.error('Error al cargar el reporte:', respuesta.status, errorTexto);
+        setMensajeReporte('Error al cargar el reporte.');
       }
     } catch (error) {
       console.error('Error cargando reporte de citas:', error);
+      setMensajeReporte('Error de conexión al cargar el reporte.');
     }
   };
 
@@ -649,7 +661,13 @@ const Menu = () => {
     }
 
     try {
-      const respuesta = await fetch('http://localhost:5001/citas/medico/reporte/pdf', {
+      const params = new URLSearchParams();
+      if (filtroFechaInicio) params.append('fechaInicio', filtroFechaInicio);
+      if (filtroFechaFin) params.append('fechaFin', filtroFechaFin);
+      if (filtroPaciente) params.append('paciente', filtroPaciente);
+      if (filtroEstado) params.append('estado', filtroEstado);
+
+      const respuesta = await fetch(`http://localhost:5001/citas/medico/reporte/pdf?${params.toString()}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
@@ -681,7 +699,6 @@ const Menu = () => {
     if (pestañaActiva === 'Perfil') {
       cargarPerfil();
     } else if (pestañaActiva === 'Citas') {
-      cargarPerfil();
       cargarEspecialidades();
       cargarCitas();
     } else if (pestañaActiva === 'Ajustes') {
@@ -1066,20 +1083,14 @@ const Menu = () => {
             <form onSubmit={crearDisponibilidad}>
               <div style={{ marginBottom: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '0.4rem' }}>Día de la Semana</label>
-                  <select
-                    value={diaSemana}
-                    onChange={(e) => setDiaSemana(e.target.value)}
+                  <label style={{ display: 'block', marginBottom: '0.4rem' }}>Fecha de Disponibilidad</label>
+                  <input
+                    type="date"
+                    value={fechaDisponibilidad}
+                    onChange={(e) => setFechaDisponibilidad(e.target.value)}
                     style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #999' }}
-                  >
-                    <option value="Lunes">Lunes</option>
-                    <option value="Martes">Martes</option>
-                    <option value="Miércoles">Miércoles</option>
-                    <option value="Jueves">Jueves</option>
-                    <option value="Viernes">Viernes</option>
-                    <option value="Sábado">Sábado</option>
-                    <option value="Domingo">Domingo</option>
-                  </select>
+                    required
+                  />
                 </div>
 
                 <div>
@@ -1142,7 +1153,7 @@ const Menu = () => {
                 <table style={{ width: '100%', borderCollapse: 'collapse', color: '#fff' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.35)' }}>
-                      <th style={{ textAlign: 'left', padding: '0.6rem' }}>Día</th>
+                      <th style={{ textAlign: 'left', padding: '0.6rem' }}>Fecha</th>
                       <th style={{ textAlign: 'left', padding: '0.6rem' }}>Hora Inicio</th>
                       <th style={{ textAlign: 'left', padding: '0.6rem' }}>Hora Fin</th>
                       <th style={{ textAlign: 'left', padding: '0.6rem' }}>Duración (min)</th>
@@ -1152,7 +1163,7 @@ const Menu = () => {
                   <tbody>
                     {disponibilidades.map((disp) => (
                       <tr key={disp.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
-                        <td style={{ padding: '0.6rem' }}>{disp.diaSemana}</td>
+                        <td style={{ padding: '0.6rem' }}>{(disp.fechaDisponibilidad || '').slice(0, 10)}</td>
                         <td style={{ padding: '0.6rem' }}>{disp.horaInicio}</td>
                         <td style={{ padding: '0.6rem' }}>{disp.horaFin}</td>
                         <td style={{ padding: '0.6rem' }}>{disp.duracionCitaMinutos}</td>
@@ -1183,23 +1194,83 @@ const Menu = () => {
           <div style={{ marginBottom: '2rem', border: '1px solid rgba(255,255,255,0.25)', borderRadius: '12px', padding: '1.5rem', backgroundColor: 'rgba(0,0,0,0.2)' }}>
             <h3>Reporte de Citas</h3>
             <p style={{ color: '#ddd' }}>Total de citas: <strong>{citasMedicoReporte.length}</strong></p>
+            {mensajeReporte && <p style={{ color: '#ffc107' }}>{mensajeReporte}</p>}
 
-            <button
-              type="button"
-              onClick={descargarReportePdfMedico}
-              style={{
-                padding: '0.85rem 1.4rem',
-                borderRadius: '10px',
-                border: 'none',
-                backgroundColor: '#2196f3',
-                color: '#fff',
-                fontWeight: 700,
-                cursor: 'pointer',
-                marginBottom: '1rem',
-              }}
-            >
-              Descargar Reporte en PDF
-            </button>
+            <div style={{ marginBottom: '1rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.4rem' }}>Fecha Inicio</label>
+                <input
+                  type="date"
+                  value={filtroFechaInicio}
+                  onChange={(e) => setFiltroFechaInicio(e.target.value)}
+                  style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #999' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.4rem' }}>Fecha Fin</label>
+                <input
+                  type="date"
+                  value={filtroFechaFin}
+                  onChange={(e) => setFiltroFechaFin(e.target.value)}
+                  style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #999' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.4rem' }}>Paciente</label>
+                <input
+                  type="text"
+                  value={filtroPaciente}
+                  onChange={(e) => setFiltroPaciente(e.target.value)}
+                  placeholder="Nombre del paciente"
+                  style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #999' }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: '0.4rem' }}>Estado</label>
+                <select
+                  value={filtroEstado}
+                  onChange={(e) => setFiltroEstado(e.target.value)}
+                  style={{ width: '100%', padding: '0.6rem', borderRadius: '8px', border: '1px solid #999' }}
+                >
+                  <option value="">Todos</option>
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="Confirmada">Confirmada</option>
+                  <option value="Cancelada">Cancelada</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem' }}>
+              <button
+                type="button"
+                onClick={cargarReporteCitasMedico}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: '#2196f3',
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                Aplicar Filtros
+              </button>
+
+              <button
+                type="button"
+                onClick={descargarReportePdfMedico}
+                style={{
+                  padding: '0.6rem 1.2rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: '#4caf50',
+                  color: '#fff',
+                  cursor: 'pointer',
+                }}
+              >
+                Descargar Reporte en PDF
+              </button>
+            </div>
 
             {citasMedicoReporte.length === 0 ? (
               <p style={{ color: '#ddd' }}>No hay citas registradas.</p>

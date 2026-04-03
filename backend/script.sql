@@ -63,26 +63,26 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM Users WHERE Username = 'prueba')
 BEGIN
-    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('prueba', '$2b$12$BqxHpVhQwUKsiBShkwMTnuUwHvvtEeOByGeARAZjc4T8Zvwc/nNs6', 'prueba@example.com', '1990-09-01');
+    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('prueba', '$2a$11$09DVHL7La.yHcowoFT4FZunP2NeF9IIvi3bs8JeBOZu.HHOh3s4r2', 'prueba@example.com', '1990-09-01');
 END
 GO
 
 -- Crear usuarios médicos si no existen
 IF NOT EXISTS (SELECT 1 FROM Users WHERE Username = 'medico_juan')
 BEGIN
-    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_juan', '$2b$12$BqxHpVhQwUKsiBShkwMTnuUwHvvtEeOByGeARAZjc4T8Zvwc/nNs6', 'juan.perez@clinica.com', '1980-05-15');
+    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_juan', '$2a$11$09DVHL7La.yHcowoFT4FZunP2NeF9IIvi3bs8JeBOZu.HHOh3s4r2', 'juan.perez@clinica.com', '1980-05-15');
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM Users WHERE Username = 'medico_maria')
 BEGIN
-    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_maria', '$2b$12$BqxHpVhQwUKsiBShkwMTnuUwHvvtEeOByGeARAZjc4T8Zvwc/nNs6', 'maria.gomez@clinica.com', '1982-07-20');
+    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_maria', '$2a$11$09DVHL7La.yHcowoFT4FZunP2NeF9IIvi3bs8JeBOZu.HHOh3s4r2', 'maria.gomez@clinica.com', '1982-07-20');
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM Users WHERE Username = 'medico_carlos')
 BEGIN
-    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_carlos', '$2b$12$BqxHpVhQwUKsiBShkwMTnuUwHvvtEeOByGeARAZjc4T8Zvwc/nNs6', 'carlos.lopez@clinica.com', '1978-03-10');
+    INSERT INTO Users (Username, Password, Email, Birthdate) VALUES ('medico_carlos', '$2a$11$09DVHL7La.yHcowoFT4FZunP2NeF9IIvi3bs8JeBOZu.HHOh3s4r2', 'carlos.lopez@clinica.com', '1978-03-10');
 END
 GO
 
@@ -126,12 +126,25 @@ BEGIN
     CREATE TABLE DisponibilidadesMedicas (
         Id UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
         MedicoId UNIQUEIDENTIFIER NOT NULL,
-        DiaSemana NVARCHAR(50) NOT NULL,
+        FechaDisponibilidad DATE NOT NULL,
         HoraInicio TIME NOT NULL,
         HoraFin TIME NOT NULL,
         DuracionCitaMinutos INT NOT NULL,
         FOREIGN KEY (MedicoId) REFERENCES Medicos(Id)
     );
+END
+GO
+
+-- Migración: Si existe DiaSemana, eliminarla y agregar FechaDisponibilidad
+IF EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.DisponibilidadesMedicas') AND name = 'DiaSemana')
+BEGIN
+    ALTER TABLE DisponibilidadesMedicas DROP COLUMN DiaSemana;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID(N'dbo.DisponibilidadesMedicas') AND name = 'FechaDisponibilidad')
+BEGIN
+    ALTER TABLE DisponibilidadesMedicas ADD FechaDisponibilidad DATE NOT NULL DEFAULT GETDATE();
 END
 GO
 
@@ -154,84 +167,54 @@ GO
 -- Poblar datos iniciales de prueba
 
 -- Especialidades
-IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Cardiología')
 BEGIN
-    INSERT INTO Especialidades (Nombre) VALUES ('Cardiología');
-END
-GO
+    IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Cardiología')
+        INSERT INTO Especialidades (Nombre) VALUES ('Cardiología');
+    IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Dermatología')
+        INSERT INTO Especialidades (Nombre) VALUES ('Dermatología');
+    IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Pediatría')
+        INSERT INTO Especialidades (Nombre) VALUES ('Pediatría');
 
-IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Dermatología')
-BEGIN
-    INSERT INTO Especialidades (Nombre) VALUES ('Dermatología');
-END
-GO
+    -- Declarar todas las variables de ID
+    DECLARE @IdCardiologia UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Cardiología');
+    DECLARE @IdDermatologia UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Dermatología');
+    DECLARE @IdPediatria UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Pediatría');
+    
+    DECLARE @IdUsuarioJuan UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_juan');
+    DECLARE @IdUsuarioMaria UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_maria');
+    DECLARE @IdUsuarioCarlos UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_carlos');
+    DECLARE @IdAdmin UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'admin');
 
-IF NOT EXISTS (SELECT 1 FROM Especialidades WHERE Nombre = 'Pediatría')
-BEGIN
-    INSERT INTO Especialidades (Nombre) VALUES ('Pediatría');
-END
-GO
+    -- Insertar Médicos
+    IF NOT EXISTS (SELECT 1 FROM Medicos WHERE UsuarioId = @IdUsuarioJuan)
+        INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioJuan, 'Juan', 'Pérez', @IdCardiologia, 'juan.perez@clinica.com', '555-1234');
+    
+    IF NOT EXISTS (SELECT 1 FROM Medicos WHERE UsuarioId = @IdUsuarioMaria)
+        INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioMaria, 'María', 'Gómez', @IdDermatologia, 'maria.gomez@clinica.com', '555-5678');
 
--- Médicos (usando IDs de especialidades y usuarios)
-DECLARE @IdCardiologia UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Cardiología');
-DECLARE @IdDermatologia UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Dermatología');
-DECLARE @IdPediatria UNIQUEIDENTIFIER = (SELECT Id FROM Especialidades WHERE Nombre = 'Pediatría');
-DECLARE @IdUsuarioJuan UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_juan');
-DECLARE @IdUsuarioMaria UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_maria');
-DECLARE @IdUsuarioCarlos UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'medico_carlos');
+    IF NOT EXISTS (SELECT 1 FROM Medicos WHERE UsuarioId = @IdUsuarioCarlos)
+        INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioCarlos, 'Carlos', 'López', @IdPediatria, 'carlos.lopez@clinica.com', '555-9012');
 
-IF NOT EXISTS (SELECT 1 FROM Medicos WHERE Nombre = 'Juan' AND Apellido = 'Pérez')
-BEGIN
-    INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioJuan, 'Juan', 'Pérez', @IdCardiologia, 'juan.perez@clinica.com', '555-1234');
-END
-GO
+    -- Obtener los IDs de la tabla Medicos recién insertados
+    DECLARE @IdMedicoJuan UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE UsuarioId = @IdUsuarioJuan);
+    DECLARE @IdMedicoMaria UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE UsuarioId = @IdUsuarioMaria);
+    DECLARE @IdMedicoCarlos UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE UsuarioId = @IdUsuarioCarlos);
 
-IF NOT EXISTS (SELECT 1 FROM Medicos WHERE Nombre = 'María' AND Apellido = 'Gómez')
-BEGIN
-    INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioMaria, 'María', 'Gómez', @IdDermatologia, 'maria.gomez@clinica.com', '555-5678');
-END
-GO
+    -- Insertar Disponibilidad médica
+    IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdMedicoJuan AND FechaDisponibilidad = DATEADD(day, 1, CAST(GETDATE() AS DATE)))
+        INSERT INTO DisponibilidadesMedicas (MedicoId, FechaDisponibilidad, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdMedicoJuan, DATEADD(day, 1, CAST(GETDATE() AS DATE)), '09:00', '17:00', 30);
 
-IF NOT EXISTS (SELECT 1 FROM Medicos WHERE Nombre = 'Carlos' AND Apellido = 'López')
-BEGIN
-    INSERT INTO Medicos (UsuarioId, Nombre, Apellido, EspecialidadId, Email, Telefono) VALUES (@IdUsuarioCarlos, 'Carlos', 'López', @IdPediatria, 'carlos.lopez@clinica.com', '555-9012');
-END
-GO
+    IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdMedicoMaria AND FechaDisponibilidad = DATEADD(day, 2, CAST(GETDATE() AS DATE)))
+        INSERT INTO DisponibilidadesMedicas (MedicoId, FechaDisponibilidad, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdMedicoMaria, DATEADD(day, 2, CAST(GETDATE() AS DATE)), '10:00', '16:00', 30);
 
--- Disponibilidad médica
-DECLARE @IdJuan UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE Nombre = 'Juan' AND Apellido = 'Pérez');
-DECLARE @IdMaria UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE Nombre = 'María' AND Apellido = 'Gómez');
-DECLARE @IdCarlos UNIQUEIDENTIFIER = (SELECT Id FROM Medicos WHERE Nombre = 'Carlos' AND Apellido = 'López');
+    IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdMedicoCarlos AND FechaDisponibilidad = DATEADD(day, 3, CAST(GETDATE() AS DATE)))
+        INSERT INTO DisponibilidadesMedicas (MedicoId, FechaDisponibilidad, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdMedicoCarlos, DATEADD(day, 3, CAST(GETDATE() AS DATE)), '08:00', '15:00', 30);
 
-IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdJuan AND DiaSemana = 'Lunes')
-BEGIN
-    INSERT INTO DisponibilidadesMedicas (MedicoId, DiaSemana, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdJuan, 'Lunes', '09:00', '17:00', 30);
-END
-GO
+    -- Insertar Citas de prueba
+    IF NOT EXISTS (SELECT 1 FROM Citas WHERE PacienteId = @IdAdmin AND MedicoId = @IdMedicoJuan AND FechaCita = '2026-04-07')
+        INSERT INTO Citas (PacienteId, MedicoId, FechaCita, HoraCita, Estado) VALUES (@IdAdmin, @IdMedicoJuan, '2026-04-07', '10:00', 'Pendiente');
 
-IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdMaria AND DiaSemana = 'Martes')
-BEGIN
-    INSERT INTO DisponibilidadesMedicas (MedicoId, DiaSemana, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdMaria, 'Martes', '10:00', '16:00', 30);
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM DisponibilidadesMedicas WHERE MedicoId = @IdCarlos AND DiaSemana = 'Miércoles')
-BEGIN
-    INSERT INTO DisponibilidadesMedicas (MedicoId, DiaSemana, HoraInicio, HoraFin, DuracionCitaMinutos) VALUES (@IdCarlos, 'Miércoles', '08:00', '15:00', 30);
-END
-GO
-
--- Citas de prueba (usando IDs de usuarios y médicos)
-DECLARE @IdAdmin UNIQUEIDENTIFIER = (SELECT Id FROM Users WHERE Username = 'admin');
-
-IF NOT EXISTS (SELECT 1 FROM Citas WHERE PacienteId = @IdAdmin AND MedicoId = @IdJuan AND FechaCita = '2026-04-07')
-BEGIN
-    INSERT INTO Citas (PacienteId, MedicoId, FechaCita, HoraCita, Estado) VALUES (@IdAdmin, @IdJuan, '2026-04-07', '10:00', 'Pendiente');
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM Citas WHERE PacienteId = @IdAdmin AND MedicoId = @IdMaria AND FechaCita = '2026-04-08')
-BEGIN
-    INSERT INTO Citas (PacienteId, MedicoId, FechaCita, HoraCita, Estado) VALUES (@IdAdmin, @IdMaria, '2026-04-08', '11:00', 'Confirmada');
+    IF NOT EXISTS (SELECT 1 FROM Citas WHERE PacienteId = @IdAdmin AND MedicoId = @IdMedicoMaria AND FechaCita = '2026-04-08')
+        INSERT INTO Citas (PacienteId, MedicoId, FechaCita, HoraCita, Estado) VALUES (@IdAdmin, @IdMedicoMaria, '2026-04-08', '11:00', 'Confirmada');
 END
 GO

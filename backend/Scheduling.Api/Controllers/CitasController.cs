@@ -29,9 +29,12 @@ public class CitasController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> ObtenerCitas()
     {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
+            return Unauthorized("Token inválido o expirado.");
+
         var citas = await _context.Citas
-            .Include(c => c.Paciente)
-            .Include(c => c.Medico)
+            .Where(c => c.PacienteId == userId)
             .Select(c => new CitaDto
             {
                 Id = c.Id,
@@ -91,7 +94,7 @@ public class CitasController : ControllerBase
             .Select(d => new
             {
                 d.Id,
-                d.DiaSemana,
+                d.FechaDisponibilidad,
                 d.HoraInicio,
                 d.HoraFin,
                 d.DuracionCitaMinutos
@@ -100,6 +103,22 @@ public class CitasController : ControllerBase
 
         return Ok(disponibilidad);
     }
+
+    [HttpGet("citas-ocupadas")]
+    public async Task<IActionResult> ObtenerCitasOcupadasPorMedico([FromQuery] Guid medicoId)
+    {
+        var citasOcupadas = await _context.Citas
+            .Where(c => c.MedicoId == medicoId && c.Estado != "Cancelada")
+            .Select(c => new
+            {
+                c.FechaCita,
+                c.HoraCita
+            })
+            .ToListAsync();
+
+        return Ok(citasOcupadas);
+    }
+
 
     [HttpPost]
     public async Task<IActionResult> CrearCita([FromBody] CrearCitaDto dto)
@@ -113,20 +132,8 @@ public class CitasController : ControllerBase
             return BadRequest("Paciente no encontrado");
 
         // Verificar disponibilidad médica
-        var diaNombre = dto.FechaCita.DayOfWeek switch
-        {
-            DayOfWeek.Monday => "Lunes",
-            DayOfWeek.Tuesday => "Martes",
-            DayOfWeek.Wednesday => "Miércoles",
-            DayOfWeek.Thursday => "Jueves",
-            DayOfWeek.Friday => "Viernes",
-            DayOfWeek.Saturday => "Sábado",
-            DayOfWeek.Sunday => "Domingo",
-            _ => dto.FechaCita.DayOfWeek.ToString()
-        };
-
         var disponibilidadesDelDia = await _context.DisponibilidadesMedicas
-            .Where(d => d.MedicoId == dto.IdMedico && d.DiaSemana.ToLower() == diaNombre.ToLower())
+            .Where(d => d.MedicoId == dto.IdMedico && d.FechaDisponibilidad.Date == dto.FechaCita.Date)
             .ToListAsync(); // Traer los horarios a memoria para evaluación en cliente
 
         // Ahora que los datos están en memoria, podemos usar la lógica de C# sin problemas
@@ -172,7 +179,7 @@ public class CitasController : ControllerBase
             Console.WriteLine($"Error sending confirmation email: {ex.Message}");
         }
 
-        return CreatedAtAction(nameof(ObtenerCitas), new { id = cita.Id }, new { cita.Id, cita.MedicoId, cita.PacienteId, cita.FechaCita, cita.HoraCita, cita.Estado });
+        return CreatedAtAction(nameof(ObtenerCitas), new { id = cita.Id }, new { cita.Id, cita.MedicoId, cita.PacienteId, cita.FechaCita, cita.HoraCita, cita.Estado, Especialidad = medico.Especialidad?.Nombre });
     }
 
     [HttpPut("{id}")]
@@ -194,20 +201,8 @@ public class CitasController : ControllerBase
             return BadRequest("Paciente no encontrado");
 
         // Verificar disponibilidad médica para nueva fecha/hora
-        var diaNombre = dto.FechaCita.DayOfWeek switch
-        {
-            DayOfWeek.Monday => "Lunes",
-            DayOfWeek.Tuesday => "Martes",
-            DayOfWeek.Wednesday => "Miércoles",
-            DayOfWeek.Thursday => "Jueves",
-            DayOfWeek.Friday => "Viernes",
-            DayOfWeek.Saturday => "Sábado",
-            DayOfWeek.Sunday => "Domingo",
-            _ => dto.FechaCita.DayOfWeek.ToString()
-        };
-
         var disponibilidadesDelDia = await _context.DisponibilidadesMedicas
-            .Where(d => d.MedicoId == dto.IdMedico && d.DiaSemana.ToLower() == diaNombre.ToLower())
+            .Where(d => d.MedicoId == dto.IdMedico && d.FechaDisponibilidad.Date == dto.FechaCita.Date)
             .ToListAsync();
 
         var horarioValido = disponibilidadesDelDia
@@ -228,7 +223,7 @@ public class CitasController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok(new { citaExistente.Id, citaExistente.MedicoId, citaExistente.PacienteId, citaExistente.FechaCita, citaExistente.HoraCita, citaExistente.Estado });
+        return Ok(new { citaExistente.Id, citaExistente.MedicoId, citaExistente.PacienteId, citaExistente.FechaCita, citaExistente.HoraCita, citaExistente.Estado, Especialidad = medico.Especialidad?.Nombre });
     }
 
     [HttpGet("{id}/pdf")]
@@ -309,7 +304,7 @@ public class CitasController : ControllerBase
             .Select(d => new
             {
                 d.Id,
-                d.DiaSemana,
+                d.FechaDisponibilidad,
                 d.HoraInicio,
                 d.HoraFin,
                 d.DuracionCitaMinutos
@@ -330,22 +325,23 @@ public class CitasController : ControllerBase
         if (medico == null)
             return NotFound("No es un médico registrado");
 
-        // Verificar si ya existe disponibilidad para ese día
+        // Verificar si ya existe disponibilidad para esa fecha
         var existente = await _context.DisponibilidadesMedicas
-            .FirstOrDefaultAsync(d => d.MedicoId == medico.Id && d.DiaSemana.ToLower() == dto.DiaSemana.ToLower());
+            .FirstOrDefaultAsync(d => d.MedicoId == medico.Id && d.FechaDisponibilidad.Date == dto.FechaDisponibilidad.Date);
 
         if (existente != null)
-            return BadRequest("Ya existe disponibilidad registrada para ese día");
+            return BadRequest("Ya existe disponibilidad registrada para esa fecha");
 
         // Convertir strings a TimeSpan
         if (!TimeSpan.TryParse(dto.HoraInicio, out var horaInicio) || !TimeSpan.TryParse(dto.HoraFin, out var horaFin))
             return BadRequest("Formato de hora inválido");
 
+
         var disponibilidad = new DisponibilidadMedica
         {
             Id = Guid.NewGuid(),
             MedicoId = medico.Id,
-            DiaSemana = dto.DiaSemana,
+            FechaDisponibilidad = dto.FechaDisponibilidad.Date,
             HoraInicio = horaInicio,
             HoraFin = horaFin,
             DuracionCitaMinutos = dto.DuracionCitaMinutos
@@ -354,7 +350,14 @@ public class CitasController : ControllerBase
         _context.DisponibilidadesMedicas.Add(disponibilidad);
         await _context.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(ObtenerDisponibilidadesMedicoActual), new { id = disponibilidad.Id }, disponibilidad);
+        return CreatedAtAction(nameof(ObtenerDisponibilidadesMedicoActual), new { id = disponibilidad.Id }, new
+        {
+            disponibilidad.Id,
+            disponibilidad.FechaDisponibilidad,
+            disponibilidad.HoraInicio,
+            disponibilidad.HoraFin,
+            disponibilidad.DuracionCitaMinutos
+        });
     }
 
     [HttpPut("medico/disponibilidades/{id}")]
@@ -378,7 +381,7 @@ public class CitasController : ControllerBase
         if (!TimeSpan.TryParse(dto.HoraInicio, out var horaInicio) || !TimeSpan.TryParse(dto.HoraFin, out var horaFin))
             return BadRequest("Formato de hora inválido");
 
-        disponibilidad.DiaSemana = dto.DiaSemana;
+        disponibilidad.FechaDisponibilidad = dto.FechaDisponibilidad.Date;
         disponibilidad.HoraInicio = horaInicio;
         disponibilidad.HoraFin = horaFin;
         disponibilidad.DuracionCitaMinutos = dto.DuracionCitaMinutos;
@@ -412,7 +415,11 @@ public class CitasController : ControllerBase
     }
 
     [HttpGet("medico/reporte")]
-    public async Task<IActionResult> ObtenerReporteCitasMedicoActual()
+    public async Task<IActionResult> ObtenerReporteCitasMedicoActual(
+        [FromQuery] DateTime? fechaInicio,
+        [FromQuery] DateTime? fechaFin,
+        [FromQuery] string paciente,
+        [FromQuery] string estado)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
@@ -425,9 +432,23 @@ public class CitasController : ControllerBase
         if (medico == null)
             return NotFound("No es un médico registrado");
 
-        var citas = await _context.Citas
+        var query = _context.Citas
             .Include(c => c.Paciente)
-            .Where(c => c.MedicoId == medico.Id)
+            .Where(c => c.MedicoId == medico.Id);
+
+        if (fechaInicio.HasValue)
+            query = query.Where(c => c.FechaCita >= fechaInicio.Value);
+
+        if (fechaFin.HasValue)
+            query = query.Where(c => c.FechaCita <= fechaFin.Value);
+
+        if (!string.IsNullOrWhiteSpace(paciente))
+            query = query.Where(c => c.Paciente != null && c.Paciente.Username.Contains(paciente));
+
+        if (!string.IsNullOrWhiteSpace(estado))
+            query = query.Where(c => c.Estado.Contains(estado));
+
+        var citas = await query
             .Select(c => new ReporteCitasDto
             {
                 Id = c.Id,
@@ -445,7 +466,11 @@ public class CitasController : ControllerBase
     }
 
     [HttpGet("medico/reporte/pdf")]
-    public async Task<IActionResult> DescargarReporteCitasMedicoActualPdf()
+    public async Task<IActionResult> DescargarReporteCitasMedicoActualPdf(
+        [FromQuery] DateTime? fechaInicio,
+        [FromQuery] DateTime? fechaFin,
+        [FromQuery] string paciente,
+        [FromQuery] string estado)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
@@ -458,9 +483,23 @@ public class CitasController : ControllerBase
         if (medico == null)
             return NotFound("No es un médico registrado");
 
-        var citas = await _context.Citas
+        var query = _context.Citas
             .Include(c => c.Paciente)
-            .Where(c => c.MedicoId == medico.Id)
+            .Where(c => c.MedicoId == medico.Id);
+
+        if (fechaInicio.HasValue)
+            query = query.Where(c => c.FechaCita >= fechaInicio.Value);
+
+        if (fechaFin.HasValue)
+            query = query.Where(c => c.FechaCita <= fechaFin.Value);
+
+        if (!string.IsNullOrWhiteSpace(paciente))
+            query = query.Where(c => c.Paciente != null && c.Paciente.Username.Contains(paciente));
+
+        if (!string.IsNullOrWhiteSpace(estado))
+            query = query.Where(c => c.Estado.Contains(estado));
+
+        var citas = await query
             .OrderByDescending(c => c.FechaCita)
             .ToListAsync();
 
