@@ -17,13 +17,14 @@ public class CitasController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
     private readonly IEmailService _emailService;
+    private readonly ICitaService _citaService;
     private readonly IPdfService _pdfService;
 
-    public CitasController(ApplicationDbContext context, IEmailService emailService, IPdfService pdfService)
+    public CitasController(ApplicationDbContext context, IEmailService emailService, IPdfService pdfService, ICitaService citaService)
     {
         _context = context;
-        _emailService = emailService;
         _pdfService = pdfService;
+        _citaService = citaService;
     }
 
     [HttpGet]
@@ -123,107 +124,29 @@ public class CitasController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CrearCita([FromBody] CrearCitaDto dto)
     {
-        var medico = await _context.Medicos.Include(m => m.Especialidad).FirstOrDefaultAsync(m => m.Id == dto.IdMedico);
-        if (medico == null)
-            return BadRequest("Médico no encontrado");
+        var (cita, error) = await _citaService.CreateCitaAsync(dto);
 
-        var paciente = await _context.Users.FindAsync(dto.IdPaciente);
-        if (paciente == null)
-            return BadRequest("Paciente no encontrado");
+        if (error != null)
+            return BadRequest(error);
 
-        // Verificar disponibilidad médica
-        var disponibilidadesDelDia = await _context.DisponibilidadesMedicas
-            .Where(d => d.MedicoId == dto.IdMedico && d.FechaDisponibilidad.Date == dto.FechaCita.Date)
-            .ToListAsync(); // Traer los horarios a memoria para evaluación en cliente
+        var medico = await _context.Medicos.Include(m => m.Especialidad).FirstOrDefaultAsync(m => m.Id == cita.MedicoId);
 
-        // Ahora que los datos están en memoria, podemos usar la lógica de C# sin problemas
-        var horarioValido = disponibilidadesDelDia
-            .Any(d => d.HoraInicio <= dto.HoraCita && dto.HoraCita.Add(TimeSpan.FromMinutes(d.DuracionCitaMinutos)) <= d.HoraFin);
-
-        if (!horarioValido)
-            return BadRequest("El médico no tiene disponibilidad en la fecha/hora solicitada");
-
-        // Verificar conflicto de citas existentes
-        var conflicto = await _context.Citas.AnyAsync(c => c.MedicoId == dto.IdMedico && c.FechaCita.Date == dto.FechaCita.Date && c.HoraCita == dto.HoraCita && c.Estado != "Cancelada");
-        if (conflicto)
-            return BadRequest("Ya existe otra cita para ese médico en el mismo horario");
-
-        var cita = new Cita
-        {
-            Id = Guid.NewGuid(),
-            MedicoId = dto.IdMedico,
-            PacienteId = dto.IdPaciente,
-            FechaCita = dto.FechaCita.Date,
-            HoraCita = dto.HoraCita,
-            Estado = "Pendiente"
-        };
-
-        _context.Citas.Add(cita);
-        await _context.SaveChangesAsync();
-
-        // Enviar email de confirmación
-        try
-        {
-            await _emailService.SendAppointmentConfirmationAsync(
-                paciente.Email,
-                paciente.Username,
-                $"{medico.Nombre} {medico.Apellido}",
-                medico.Especialidad?.Nombre ?? "Sin especialidad",
-                cita.FechaCita,
-                cita.HoraCita
-            );
-        }
-        catch (Exception ex)
-        {
-            // Log error but don't fail the appointment creation
-            Console.WriteLine($"Error sending confirmation email: {ex.Message}");
-        }
-
-        return CreatedAtAction(nameof(ObtenerCitas), new { id = cita.Id }, new { cita.Id, cita.MedicoId, cita.PacienteId, cita.FechaCita, cita.HoraCita, cita.Estado, Especialidad = medico.Especialidad?.Nombre });
+        return CreatedAtAction(nameof(ObtenerCitas), new { id = cita.Id }, new { cita.Id, cita.MedicoId, cita.PacienteId, cita.FechaCita, cita.HoraCita, cita.Estado, Especialidad = medico?.Especialidad?.Nombre });
     }
 
     [HttpPut("{id}")]
     public async Task<IActionResult> ReprogramarCita(Guid id, [FromBody] CrearCitaDto dto)
     {
-        var citaExistente = await _context.Citas.Include(c => c.Medico).ThenInclude(m => m.Especialidad).FirstOrDefaultAsync(c => c.Id == id);
-        if (citaExistente == null)
-            return NotFound("Cita a reprogramar no encontrada");
+        var (cita, error) = await _citaService.ReprogramarCitaAsync(id, dto);
 
-        if (citaExistente.Estado == "Cancelada")
-            return BadRequest("No se puede reprogramar una cita cancelada");
+        if (error != null)
+        {
+            // Distinguir entre no encontrado y otras solicitudes incorrectas
+            if (error.Contains("no encontrada")) return NotFound(error);
+            return BadRequest(error);
+        }
 
-        var medico = await _context.Medicos.FindAsync(dto.IdMedico);
-        if (medico == null)
-            return BadRequest("Médico no encontrado");
-
-        var paciente = await _context.Users.FindAsync(dto.IdPaciente);
-        if (paciente == null)
-            return BadRequest("Paciente no encontrado");
-
-        // Verificar disponibilidad médica para nueva fecha/hora
-        var disponibilidadesDelDia = await _context.DisponibilidadesMedicas
-            .Where(d => d.MedicoId == dto.IdMedico && d.FechaDisponibilidad.Date == dto.FechaCita.Date)
-            .ToListAsync();
-
-        var horarioValido = disponibilidadesDelDia
-            .Any(d => d.HoraInicio <= dto.HoraCita && dto.HoraCita.Add(TimeSpan.FromMinutes(d.DuracionCitaMinutos)) <= d.HoraFin);
-
-        if (!horarioValido)
-            return BadRequest("El médico no tiene disponibilidad en la fecha/hora solicitada");
-
-        // No conflicto con otras citas que no sean ella misma
-        var conflicto = await _context.Citas.AnyAsync(c => c.Id != id && c.MedicoId == dto.IdMedico && c.FechaCita.Date == dto.FechaCita.Date && c.HoraCita == dto.HoraCita && c.Estado != "Cancelada");
-        if (conflicto)
-            return BadRequest("Ya existe otra cita para ese médico en el mismo horario");
-
-        citaExistente.MedicoId = dto.IdMedico;
-        citaExistente.PacienteId = dto.IdPaciente;
-        citaExistente.FechaCita = dto.FechaCita.Date;
-        citaExistente.HoraCita = dto.HoraCita;
-
-        await _context.SaveChangesAsync();
-
-        return Ok(new { citaExistente.Id, citaExistente.MedicoId, citaExistente.PacienteId, citaExistente.FechaCita, citaExistente.HoraCita, citaExistente.Estado, Especialidad = medico.Especialidad?.Nombre });
+        return Ok(new { cita.Id, cita.MedicoId, cita.PacienteId, cita.FechaCita, cita.HoraCita, cita.Estado, Especialidad = cita.Medico?.Especialidad?.Nombre });
     }
 
     [HttpGet("{id}/pdf")]

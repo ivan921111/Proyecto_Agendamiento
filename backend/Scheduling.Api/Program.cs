@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using QuestPDF;
 using QuestPDF.Infrastructure;
+using Scheduling.Api.Application.Interfaces;
 using Scheduling.Api.Application.Services;
 using Scheduling.Api.Infrastructure.Data;
 
@@ -40,6 +41,10 @@ builder.Services.AddSwaggerGen();
 
 // Registrar servicios PDF/Email
 builder.Services.AddSingleton<IPdfService, PdfService>();
+
+// Registrar la capa de aplicación y repositorios
+builder.Services.AddScoped<ICitaService, CitaService>();
+builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 
 var useMockEmail = bool.TryParse(builder.Configuration["Email:UseMock"], out var isMock) && isMock;
 if (useMockEmail)
