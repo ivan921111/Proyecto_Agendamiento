@@ -418,7 +418,7 @@ public class CitasController : ControllerBase
     public async Task<IActionResult> ObtenerReporteCitasMedicoActual(
         [FromQuery] DateTime? fechaInicio,
         [FromQuery] DateTime? fechaFin,
-        [FromQuery] string paciente,
+        [FromQuery] string? paciente,
         [FromQuery] string estado)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -469,8 +469,8 @@ public class CitasController : ControllerBase
     public async Task<IActionResult> DescargarReporteCitasMedicoActualPdf(
         [FromQuery] DateTime? fechaInicio,
         [FromQuery] DateTime? fechaFin,
-        [FromQuery] string paciente,
-        [FromQuery] string estado)
+        [FromQuery] string? paciente,
+        [FromQuery] string? estado)
     {
         var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrWhiteSpace(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))

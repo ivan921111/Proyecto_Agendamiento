@@ -319,7 +319,7 @@ const Menu = () => {
           while (minutosActuales + dispDia.duracionCitaMinutos <= minutosFin) {
             const hora = Math.floor(minutosActuales / 60).toString().padStart(2, '0');
             const minutos = (minutosActuales % 60).toString().padStart(2, '0');
-            const horaStr = `${hora}:${minutos}:00`; // Formato HH:mm:ss
+            const horaStr = `${hora}:${minutos}`; // Formato HH:mm
 
             disponibles.push({
               fecha: fechaStr,
@@ -333,8 +333,8 @@ const Menu = () => {
         }
       }
 
-      const citasTomadasSet = new Set(citasOcupadasDelMedico.map(c => `${(c.fechaCita || '').slice(0, 10)}T${(c.horaCita || '')}`));
-      const disponiblesFiltradas = disponibles.filter(d => !citasTomadasSet.has(`${d.fecha}T${d.hora}`));
+      const citasTomadasSet = new Set(citasOcupadasDelMedico.map(c => `${(c.fechaCita || '').slice(0, 10)}|${(c.horaCita || '').slice(0, 5)}`));
+      const disponiblesFiltradas = disponibles.filter(d => !citasTomadasSet.has(`${d.fecha}|${d.hora}`));
 
       // Ver si hay una cita activa (no cancelada) en esta especialidad para este paciente
       const nombreEspecialidadSeleccionada = especialidades.find(e => e.id === especialidadSeleccionada)?.nombre;
@@ -508,7 +508,7 @@ const Menu = () => {
         setMedicoInfo(datos);
         setEsMedico(true);
         await cargarDisponibilidadesMedico();
-        await cargarReporteCitasMedico();
+        await cargarReporteCitasMedico('Pendiente'); // Carga inicial con estado 'Pendiente'
       } else {
         setEsMedico(false);
       }
@@ -620,7 +620,7 @@ const Menu = () => {
     }
   };
 
-  const cargarReporteCitasMedico = async () => {
+  const cargarReporteCitasMedico = async (estadoInicial = 'Pendiente') => {
     if (!token) return;
 
     setMensajeReporte('Cargando reporte...');
@@ -630,7 +630,12 @@ const Menu = () => {
       if (filtroFechaInicio) params.append('fechaInicio', filtroFechaInicio);
       if (filtroFechaFin) params.append('fechaFin', filtroFechaFin);
       if (filtroPaciente) params.append('paciente', filtroPaciente);
-      if (filtroEstado) params.append('estado', filtroEstado);
+
+      // Usar el estado del filtro si ya está establecido, si no, usar el estado inicial.
+      const estadoAFiltrar = filtroEstado || estadoInicial;
+      if (estadoAFiltrar) {
+        params.append('estado', estadoAFiltrar);
+      }
 
       const respuesta = await fetch(`http://localhost:5001/citas/medico/reporte?${params.toString()}`, {
         headers: {
@@ -642,11 +647,14 @@ const Menu = () => {
       if (respuesta.ok) {
         const datos = await respuesta.json();
         setCitasMedicoReporte(datos);
+        if (filtroEstado === '' && estadoInicial) {
+          setFiltroEstado(estadoInicial);
+        }
         setMensajeReporte(`Reporte cargado. Total: ${datos.length} citas.`);
       } else {
         const errorTexto = await respuesta.text();
-        console.error('Error al cargar el reporte:', respuesta.status, errorTexto);
-        setMensajeReporte('Error al cargar el reporte.');
+        console.error('Error al cargar el reporte:', respuesta.status, errorTexto || 'El servidor no devolvió un mensaje de error.');
+        setMensajeReporte(`Error al cargar el reporte: ${errorTexto || 'Respuesta vacía del servidor.'}`);
       }
     } catch (error) {
       console.error('Error cargando reporte de citas:', error);
@@ -660,10 +668,13 @@ const Menu = () => {
       return;
     }
 
+    setMensajeAjustes('Iniciando descarga del reporte en PDF...');
+
     try {
       const params = new URLSearchParams();
       if (filtroFechaInicio) params.append('fechaInicio', filtroFechaInicio);
       if (filtroFechaFin) params.append('fechaFin', filtroFechaFin);
+      // Asegurarse de que el parámetro paciente se envíe incluso si está vacío, si el backend lo requiere.
       if (filtroPaciente) params.append('paciente', filtroPaciente);
       if (filtroEstado) params.append('estado', filtroEstado);
 
@@ -673,12 +684,17 @@ const Menu = () => {
         },
       });
 
+      console.log('Respuesta del servidor para PDF:', respuesta.status);
+
       if (!respuesta.ok) {
-        setMensajeAjustes('Error al descargar el reporte.');
+        const errorTexto = await respuesta.text();
+        console.error('Error al descargar el reporte PDF:', respuesta.status, errorTexto);
+        setMensajeAjustes(`Error al descargar el reporte: ${errorTexto || 'El servidor no devolvió un mensaje de error.'}`);
         return;
       }
 
       const blob = await respuesta.blob();
+      console.log('Blob recibido, tamaño:', blob.size, 'tipo:', blob.type);
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -691,7 +707,7 @@ const Menu = () => {
       setMensajeAjustes('Reporte descargado exitosamente.');
     } catch (error) {
       console.error('Error descargando reporte:', error);
-      setMensajeAjustes('Error al descargar el reporte.');
+      setMensajeAjustes(`Error de conexión al descargar el reporte: ${error.message}`);
     }
   };
 
@@ -1242,7 +1258,7 @@ const Menu = () => {
 
             <div style={{ marginBottom: '1rem', display: 'flex', gap: '1rem' }}>
               <button
-                type="button"
+                type="button" // Cambiado de submit a button si no es un form
                 onClick={cargarReporteCitasMedico}
                 style={{
                   padding: '0.6rem 1.2rem',

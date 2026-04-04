@@ -99,8 +99,7 @@ public class PdfService : IPdfService
                             };
 
                             table.Cell().Padding(8).Text(cita.FechaCita.ToString("dd/MM/yyyy")).FontSize(11);
-                            var horaFormato = cita.HoraCita.ToString("HH:mm");
-                            table.Cell().Padding(8).Text(horaFormato).FontSize(11);
+                            table.Cell().Padding(8).Text(cita.HoraCita.ToString(@"hh\:mm")).FontSize(11);
                             table.Cell().Padding(8).Text(cita.PacienteNombre).FontSize(11);
                             table.Cell().Padding(8).Background(estadoColor).Text(cita.Estado).FontColor(Colors.White).SemiBold().FontSize(10);
                             table.Cell().Padding(8).Text(cita.PacienteEmail ?? "-").FontSize(10);

@@ -9,7 +9,7 @@ namespace Scheduling.Api.Controllers;
 
 [Authorize]
 [ApiController]
-[Route("[controller]")]
+[Route("api/[controller]")]
 public class AppointmentsController : ControllerBase
 {
     private readonly ApplicationDbContext _context;
